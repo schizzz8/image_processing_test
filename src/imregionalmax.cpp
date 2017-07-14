@@ -57,9 +57,11 @@ int main(int argc, char** argv)
     }
     mdist = std::sqrt(mdist);
 
+    cerr << "max computed distance: " << mdist << endl;
+
     RGBImage output_image;
     output_image.create(rows,cols);
-    output_image = cv::Vec3b(0,0,0);
+    output_image = cv::Vec3b(100,100,100);
     for (int r=0; r<rows; ++r){
         const float* dist_ptr = distances.ptr<const float>(r);
         const unsigned char* occ_ptr = occupancy.ptr<const unsigned char>(r);
@@ -70,8 +72,6 @@ int main(int argc, char** argv)
             if(occ != 205){
                 float ndist = std::sqrt(dist)/mdist;
                 *out_ptr=cv::Vec3b(0,ndist*255,0);
-            } else {
-                *out_ptr=cv::Vec3b(100,100,100);
             }
         }
     }
