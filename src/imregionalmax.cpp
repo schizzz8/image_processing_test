@@ -8,7 +8,9 @@
 using namespace std;
 using namespace srrg_core;
 
-int threshold = 70;
+typedef std::vector< std::vector<Eigen::Vector2f> > ClusterVector;
+
+int threshold = 50;
 const int threshold_max = 200;
 
 int type = cv::MORPH_RECT;
@@ -20,6 +22,8 @@ cv::Mat element = cv::getStructuringElement(type,
 UnsignedCharImage marker;
 UnsignedCharImage mask;
 UnsignedCharImage bitmask;
+cv::Mat output_image;
+cv::Mat cluster_image;
 
 
 string window_name = "reconstruction parameters";
@@ -55,7 +59,6 @@ void onTrackbar(int,void*){
             iterate = false;
     }
 
-    cv::Mat output_image;
     cv::subtract(mask,marker,output_image);
     cv::imshow(window_name, output_image);
 
@@ -136,11 +139,108 @@ int main(int argc, char** argv)
     cv::namedWindow("distance map",CV_WINDOW_NORMAL);
     cv::imshow("distance map", mask);
 
+    cv::waitKey(0);
+
+
     cv::namedWindow(window_name,CV_WINDOW_NORMAL);
     cv::createTrackbar("trackbar",window_name,&threshold,threshold_max,onTrackbar);
     onTrackbar(threshold,0);
 
     cv::waitKey(0);
+
+    cv::imwrite("output_image.png",output_image);
+
+    int count=0;
+    float radius = 0.5f;
+    float resolution = 0.01;
+    ClusterVector clusters;
+    vector<Eigen::Vector2f> points;
+
+    for(int r=0; r<rows; ++r)
+        for(int c=0; c<cols; ++c){
+
+            if(output_image.at<unsigned char>(r,c) > 9)
+                points.push_back(Eigen::Vector2f (c*resolution,r*resolution));
+        }
+
+    cerr << "Clustering of " << points.size() << " points" << endl;
+    vector<bool> processed (points.size(),false);
+
+    for(int i=0; i<points.size(); i++){
+        if(processed[i])
+            continue;
+
+        vector<int> seed_queue;
+        int sq_idx = 0;
+        seed_queue.push_back(i);
+
+        processed[i] = true;
+
+        while(sq_idx < seed_queue.size()){
+            vector<int> neighbors;
+
+            for(int j=0; j<points.size(); j++){
+                if(j == i)
+                    continue;
+
+                //cerr << (points[i] - points[j]).norm() << endl;
+
+                if((points[i] - points[j]).norm() <= radius)
+                    neighbors.push_back(j);
+            }
+
+            if(neighbors.size() == 0){
+                sq_idx++;
+                continue;
+            }
+
+            for(int j=0; j<neighbors.size(); j++){
+                if(processed[neighbors[j]])
+                    continue;
+                seed_queue.push_back(neighbors[j]);
+                processed[neighbors[j]] = true;
+            }
+            sq_idx++;
+        }
+
+        vector<Eigen::Vector2f> cluster;
+        for(int j=0; j < seed_queue.size(); j++){
+            cluster.push_back(points[seed_queue[j]]);
+        }
+        count++;
+        clusters.push_back(cluster);
+    }
+
+    cerr << "Found " << count << " clusters" << endl;
+
+    mask.copyTo(cluster_image);
+    cv::cvtColor(cluster_image,cluster_image,CV_GRAY2RGB);
+
+    vector<cv::Scalar> colors;
+    colors.push_back(cv::Scalar (255,0,0));
+    colors.push_back(cv::Scalar (0,255,0));
+    colors.push_back(cv::Scalar (0,0,255));
+
+    for(int ii=0; ii<clusters.size(); ii++){
+        vector<Eigen::Vector2f> cluster = clusters[ii];
+        for(vector<Eigen::Vector2f>::const_iterator it = cluster.begin();
+            it != cluster.end();
+            it++){
+            Eigen::Vector2f point = *it;
+            cv::circle(cluster_image,
+                       cv::Point ((point.x())/resolution,(point.y())/resolution),
+                       8,
+                       colors[ii%3],
+                    2
+                    );
+        }
+    }
+
+    cv::namedWindow("Image",cv::WINDOW_NORMAL);
+    cv::imshow("Image",cluster_image);
+
+    cv::waitKey(0);
+
 
     return 0;
 }
