@@ -8,13 +8,66 @@
 using namespace std;
 using namespace srrg_core;
 
+int threshold = 70;
+const int threshold_max = 200;
+
+int type = cv::MORPH_RECT;
+int size = 10;
+cv::Mat element = cv::getStructuringElement(type,
+                                            cv::Size (2*size + 1, 2*size + 1),
+                                            cv::Point (size, size));
+
+UnsignedCharImage marker;
+UnsignedCharImage mask;
+UnsignedCharImage bitmask;
+
+
+string window_name = "reconstruction parameters";
+
+int rows,cols;
+
+void onTrackbar(int,void*){
+
+    for (int r=0; r<rows; ++r){
+        const unsigned char* mask_ptr = mask.ptr<const unsigned char>(r);
+        const unsigned char* bitmask_ptr = bitmask.ptr<const unsigned char>(r);
+        unsigned char* marker_ptr = marker.ptr<unsigned char>(r);
+        for (int c=0; c<cols; ++c, ++mask_ptr, ++bitmask_ptr, ++marker_ptr) {
+            const unsigned char& mask=*mask_ptr;
+            const unsigned char& bitmask = *bitmask_ptr;
+            if(bitmask == 255){
+                *marker_ptr = mask - threshold;
+            }
+        }
+    }
+
+    cv::Mat dilated_image;
+    bool iterate = true;
+    while(iterate){
+        cv::dilate(marker, dilated_image, element);
+        cv::Mat min_image;
+        cv::min(dilated_image,mask,min_image);
+        cv::Mat diff_image;
+        cv::subtract(min_image,marker,diff_image);
+        int diff = cv::countNonZero(diff_image);
+        marker = min_image;
+        if (diff == 0)
+            iterate = false;
+    }
+
+    cv::Mat output_image;
+    cv::subtract(mask,marker,output_image);
+    cv::imshow(window_name, output_image);
+
+}
+
 int main(int argc, char** argv)
 {
     string input_filename = argv[1];
 
     cv::Mat input = cv::imread(input_filename, 1);
-    int rows=input.rows;
-    int cols=input.cols;
+    rows=input.rows;
+    cols=input.cols;
 
     UnsignedCharImage occupancy;
     cv::cvtColor(input,occupancy,CV_BGR2GRAY);
@@ -59,27 +112,35 @@ int main(int argc, char** argv)
 
     cerr << "max computed distance: " << mdist << endl;
 
-    RGBImage output_image;
-    output_image.create(rows,cols);
-    output_image = cv::Vec3b(100,100,100);
+    mask.create(rows,cols);
+    mask = 100;
+    bitmask.create(rows,cols);
+    bitmask = 0;
     for (int r=0; r<rows; ++r){
         const float* dist_ptr = distances.ptr<const float>(r);
         const unsigned char* occ_ptr = occupancy.ptr<const unsigned char>(r);
-        cv::Vec3b* out_ptr = output_image.ptr<cv::Vec3b>(r);
-        for (int c=0; c<cols; ++c, ++out_ptr, ++dist_ptr, ++occ_ptr) {
+        unsigned char* mask_ptr = mask.ptr<unsigned char>(r);
+        unsigned char* bitmask_ptr = bitmask.ptr<unsigned char>(r);
+        for (int c=0; c<cols; ++c, ++mask_ptr, ++bitmask_ptr, ++dist_ptr, ++occ_ptr) {
             const float& dist=*dist_ptr;
             const unsigned char& occ = *occ_ptr;
-            if(occ != 205){
-                float ndist = std::sqrt(dist)/mdist;
-                *out_ptr=cv::Vec3b(0,ndist*255,0);
+            if(occ == 254){
+                *mask_ptr=(std::sqrt(dist)/mdist)*255;
+                *bitmask_ptr = 255;
             }
         }
     }
+    marker.create(rows,cols);
+    marker = 100;
 
     cv::namedWindow("distance map",CV_WINDOW_NORMAL);
-    cv::imshow("distance map", output_image);
-    cv::waitKey();
+    cv::imshow("distance map", mask);
 
+    cv::namedWindow(window_name,CV_WINDOW_NORMAL);
+    cv::createTrackbar("trackbar",window_name,&threshold,threshold_max,onTrackbar);
+    onTrackbar(threshold,0);
+
+    cv::waitKey(0);
 
     return 0;
 }
